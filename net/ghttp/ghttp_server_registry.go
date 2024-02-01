@@ -22,6 +22,8 @@ func (s *Server) doServiceRegister() {
 	if s.registrar == nil {
 		return
 	}
+	s.serviceMu.Lock()
+	defer s.serviceMu.Unlock()
 	var (
 		ctx      = gctx.GetInitCtx()
 		protocol = gsvc.DefaultProtocol
@@ -56,27 +58,40 @@ func (s *Server) doServiceDeregister() {
 	if s.registrar == nil {
 		return
 	}
+	s.serviceMu.Lock()
+	defer s.serviceMu.Unlock()
+	if s.service == nil {
+		return
+	}
 	var ctx = gctx.GetInitCtx()
 	s.Logger().Debugf(ctx, `service deregister: %+v`, s.service)
 	if err := s.registrar.Deregister(ctx, s.service); err != nil {
 		s.Logger().Errorf(ctx, `%+v`, err)
 	}
+	s.service = nil
 }
 
 func (s *Server) calculateListenedEndpoints(ctx context.Context) gsvc.Endpoints {
 	var (
 		configAddr = s.config.Address
 		endpoints  = make(gsvc.Endpoints, 0)
+		addresses  = s.config.Endpoints
 	)
 	if configAddr == "" {
 		configAddr = s.config.HTTPSAddr
 	}
-	for _, address := range gstr.SplitAndTrim(configAddr, ",") {
+	if len(addresses) == 0 {
+		addresses = gstr.SplitAndTrim(configAddr, ",")
+	}
+	for _, address := range addresses {
 		var (
 			addrArray     = gstr.Split(address, ":")
 			listenedIps   []string
 			listenedPorts []int
 		)
+		if len(addrArray) == 1 {
+			addrArray = append(addrArray, gconv.String(defaultEndpointPort))
+		}
 		// IPs.
 		switch addrArray[0] {
 		case "127.0.0.1":

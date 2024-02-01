@@ -14,8 +14,9 @@ import (
 )
 
 // Convert converts the variable `fromValue` to the type `toTypeName`, the type `toTypeName` is specified by string.
+//
 // The optional parameter `extraParams` is used for additional necessary parameter for this conversion.
-// It supports common types conversion as its conversion based on type name string.
+// It supports common basic types conversion as its conversion based on type name string.
 func Convert(fromValue interface{}, toTypeName string, extraParams ...interface{}) interface{} {
 	return doConvert(doConvertInput{
 		FromValue:  fromValue,
@@ -25,10 +26,29 @@ func Convert(fromValue interface{}, toTypeName string, extraParams ...interface{
 	})
 }
 
+// ConvertWithRefer converts the variable `fromValue` to the type referred by value `referValue`.
+//
+// The optional parameter `extraParams` is used for additional necessary parameter for this conversion.
+// It supports common basic types conversion as its conversion based on type name string.
+func ConvertWithRefer(fromValue interface{}, referValue interface{}, extraParams ...interface{}) interface{} {
+	var referValueRf reflect.Value
+	if v, ok := referValue.(reflect.Value); ok {
+		referValueRf = v
+	} else {
+		referValueRf = reflect.ValueOf(referValue)
+	}
+	return doConvert(doConvertInput{
+		FromValue:  fromValue,
+		ToTypeName: referValueRf.Type().String(),
+		ReferValue: referValue,
+		Extra:      extraParams,
+	})
+}
+
 type doConvertInput struct {
 	FromValue  interface{}   // Value that is converted from.
 	ToTypeName string        // Target value type name in string.
-	ReferValue interface{}   // Referred value, a value in type `ToTypeName`.
+	ReferValue interface{}   // Referred value, a value in type `ToTypeName`. Note that its type might be reflect.Value.
 	Extra      []interface{} // Extra values for implementing the converting.
 	// Marks that the value is already converted and set to `ReferValue`. Caller can ignore the returned result.
 	// It is an attribute for internal usage purpose.
@@ -193,7 +213,7 @@ func doConvert(in doConvertInput) (convertedValue interface{}) {
 		}
 		return Time(in.FromValue)
 	case "*time.Time":
-		var v interface{}
+		var v time.Time
 		if len(in.Extra) > 0 {
 			v = Time(in.FromValue, String(in.Extra[0]))
 		} else {
@@ -249,18 +269,27 @@ func doConvert(in doConvertInput) (convertedValue interface{}) {
 	case "[]map[string]interface{}":
 		return Maps(in.FromValue)
 
-	case "json.RawMessage":
+	case "RawMessage", "json.RawMessage":
 		return Bytes(in.FromValue)
 
 	default:
 		if in.ReferValue != nil {
-			var (
-				referReflectValue reflect.Value
-			)
+			var referReflectValue reflect.Value
 			if v, ok := in.ReferValue.(reflect.Value); ok {
 				referReflectValue = v
 			} else {
 				referReflectValue = reflect.ValueOf(in.ReferValue)
+			}
+			var fromReflectValue reflect.Value
+			if v, ok := in.FromValue.(reflect.Value); ok {
+				fromReflectValue = v
+			} else {
+				fromReflectValue = reflect.ValueOf(in.FromValue)
+			}
+
+			// custom converter.
+			if dstReflectValue, ok, _ := callCustomConverterWithRefer(fromReflectValue, referReflectValue); ok {
+				return dstReflectValue.Interface()
 			}
 
 			defer func() {
@@ -272,7 +301,8 @@ func doConvert(in doConvertInput) (convertedValue interface{}) {
 					}
 				}
 			}()
-			if referReflectValue.Kind() == reflect.Ptr {
+			switch referReflectValue.Kind() {
+			case reflect.Ptr:
 				// Type converting for custom type pointers.
 				// Eg:
 				// type PayMode int
@@ -294,11 +324,19 @@ func doConvert(in doConvertInput) (convertedValue interface{}) {
 					in.alreadySetToReferValue = true
 					return originTypeValue.Addr().Convert(referReflectValue.Type()).Interface()
 				}
+
+			case reflect.Map:
+				var targetValue = reflect.New(referReflectValue.Type()).Elem()
+				if err := doMapToMap(in.FromValue, targetValue); err == nil {
+					in.alreadySetToReferValue = true
+				}
+				return targetValue.Interface()
 			}
 			in.ToTypeName = referReflectValue.Kind().String()
 			in.ReferValue = nil
 			in.alreadySetToReferValue = true
-			return reflect.ValueOf(doConvert(in)).Convert(referReflectValue.Type()).Interface()
+			convertedValue = reflect.ValueOf(doConvert(in)).Convert(referReflectValue.Type()).Interface()
+			return convertedValue
 		}
 		return in.FromValue
 	}

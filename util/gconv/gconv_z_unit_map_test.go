@@ -528,13 +528,67 @@ field3:
 		t.AssertNil(err)
 
 		_, err = json.Marshal(parsed)
-		t.Assert(err.Error(), "json: unsupported type: map[interface {}]interface {}")
+		t.AssertNil(err)
 
 		converted := gconv.MapDeep(parsed)
 		jsonData, err := json.Marshal(converted)
 		t.AssertNil(err)
 
 		t.Assert(string(jsonData), `{"field3":{"123":"integer_key"},"outer_struct":{"field1":{"inner1":123,"inner2":345},"field2":{"inner1":123,"inner2":345,"inner3":456,"inner4":789}}}`)
+	})
+}
+
+func Test_MapWithDeepOption(t *testing.T) {
+	type Base struct {
+		Id   int    `c:"id"`
+		Date string `c:"date"`
+	}
+	type User struct {
+		UserBase Base   `c:"base"`
+		Passport string `c:"passport"`
+		Password string `c:"password"`
+		Nickname string `c:"nickname"`
+	}
+
+	gtest.C(t, func(t *gtest.T) {
+		user := &User{
+			UserBase: Base{
+				Id:   1,
+				Date: "2019-10-01",
+			},
+			Passport: "john",
+			Password: "123456",
+			Nickname: "JohnGuo",
+		}
+		m := gconv.Map(user)
+		t.Assert(m, g.Map{
+			"base":     user.UserBase,
+			"passport": user.Passport,
+			"password": user.Password,
+			"nickname": user.Nickname,
+		})
+	})
+
+	gtest.C(t, func(t *gtest.T) {
+		user := &User{
+			UserBase: Base{
+				Id:   1,
+				Date: "2019-10-01",
+			},
+			Passport: "john",
+			Password: "123456",
+			Nickname: "JohnGuo",
+		}
+		m := gconv.Map(user, gconv.MapOption{Deep: true})
+		t.Assert(m, g.Map{
+			"base": g.Map{
+				"id":   user.UserBase.Id,
+				"date": user.UserBase.Date,
+			},
+			"passport": user.Passport,
+			"password": user.Password,
+			"nickname": user.Nickname,
+		})
 	})
 }
 
@@ -617,6 +671,53 @@ func TestMapWithJsonOmitEmpty(t *testing.T) {
 			Key:   "",
 			Value: 1,
 		}
-		t.Assert(gconv.Map(s), g.Map{"Value": 1})
+		m1 := gconv.Map(s)
+		t.Assert(m1, g.Map{
+			"Key":   "",
+			"Value": 1,
+		})
+
+		m2 := gconv.Map(s, gconv.MapOption{
+			Deep:      false,
+			OmitEmpty: true,
+			Tags:      nil,
+		})
+		t.Assert(m2, g.Map{
+			"Value": 1,
+		})
+	})
+
+	gtest.C(t, func(t *gtest.T) {
+		type ProductConfig struct {
+			Pid      int `v:"required" json:"pid,omitempty"`
+			TimeSpan int `v:"required" json:"timeSpan,omitempty"`
+		}
+		type CreateGoodsDetail struct {
+			ProductConfig
+			AutoRenewFlag int `v:"required" json:"autoRenewFlag"`
+		}
+		s := &CreateGoodsDetail{
+			ProductConfig: ProductConfig{
+				Pid:      1,
+				TimeSpan: 0,
+			},
+			AutoRenewFlag: 0,
+		}
+		m1 := gconv.Map(s)
+		t.Assert(m1, g.Map{
+			"pid":           1,
+			"timeSpan":      0,
+			"autoRenewFlag": 0,
+		})
+
+		m2 := gconv.Map(s, gconv.MapOption{
+			Deep:      false,
+			OmitEmpty: true,
+			Tags:      nil,
+		})
+		t.Assert(m2, g.Map{
+			"pid":           1,
+			"autoRenewFlag": 0,
+		})
 	})
 }

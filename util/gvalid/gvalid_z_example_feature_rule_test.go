@@ -331,6 +331,34 @@ func ExampleRule_Email() {
 	// The MailAddr4 value `gf#goframe.org` is not a valid email address
 }
 
+func ExampleRule_Enums() {
+	type Status string
+	const (
+		StatusRunning Status = "Running"
+		StatusOffline Status = "Offline"
+	)
+	type BizReq struct {
+		Id     int    `v:"required"`
+		Name   string `v:"required"`
+		Status Status `v:"enums"`
+	}
+
+	var (
+		ctx = context.Background()
+		req = BizReq{
+			Id:     1,
+			Name:   "john",
+			Status: Status("Pending"),
+		}
+	)
+	if err := g.Validator().Data(req).Run(ctx); err != nil {
+		fmt.Print(gstr.Join(err.Strings(), "\n"))
+	}
+
+	// May Output:
+	// The Status value `Pending` should be in enums of: ["Running","Offline"]
+}
+
 func ExampleRule_Phone() {
 	type BizReq struct {
 		PhoneNumber1 string `v:"phone"`
@@ -480,9 +508,9 @@ func ExampleRule_Password2() {
 	}
 
 	// Output:
-	// The Password2 value `gofra` is not a valid password format
-	// The Password3 value `Goframe` is not a valid password format
-	// The Password4 value `goframe123` is not a valid password format
+	// The Password2 value `gofra` is not a valid password2 format
+	// The Password3 value `Goframe` is not a valid password2 format
+	// The Password4 value `goframe123` is not a valid password2 format
 }
 
 func ExampleRule_Password3() {
@@ -505,8 +533,8 @@ func ExampleRule_Password3() {
 	}
 
 	// Output:
-	// The Password2 value `gofra` is not a valid password format
-	// The Password3 value `Goframe123` is not a valid password format
+	// The Password2 value `gofra` is not a valid password3 format
+	// The Password3 value `Goframe123` is not a valid password3 format
 }
 
 func ExampleRule_Postcode() {
@@ -1012,7 +1040,7 @@ func ExampleRule_Same() {
 	}
 
 	// Output:
-	// The Password value `goframe.org` must be the same as field Password2
+	// The Password value `goframe.org` must be the same as field Password2 value `goframe.net`
 }
 
 func ExampleRule_Different() {
@@ -1034,7 +1062,7 @@ func ExampleRule_Different() {
 	}
 
 	// Output:
-	// The OtherMailAddr value `gf@goframe.org` must be different from field MailAddr
+	// The OtherMailAddr value `gf@goframe.org` must be different from field MailAddr value `gf@goframe.org`
 }
 
 func ExampleRule_In() {

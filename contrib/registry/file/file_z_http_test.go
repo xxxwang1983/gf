@@ -12,14 +12,13 @@ import (
 	"time"
 
 	"github.com/gogf/gf/contrib/registry/file/v2"
-	"github.com/gogf/gf/v2/errors/gcode"
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/net/gsvc"
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/test/gtest"
+	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/guid"
 )
 
@@ -59,7 +58,7 @@ func Test_HTTP_Discovery_Disable(t *testing.T) {
 	defer gfile.Remove(dirPath)
 	gsvc.SetRegistry(file.New(dirPath))
 
-	s := g.Server()
+	s := g.Server(svcName)
 	s.BindHandler("/http-registry", func(r *ghttp.Request) {
 		r.Response.Write(svcName)
 	})
@@ -71,17 +70,44 @@ func Test_HTTP_Discovery_Disable(t *testing.T) {
 
 	gtest.C(t, func(t *gtest.T) {
 		client := g.Client()
-		client.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
+		client.SetPrefix(fmt.Sprintf("http://%s", svcName))
 		result, err := client.Get(ctx, "/http-registry")
-		defer result.Close()
-		t.Assert(gerror.Code(err), gcode.CodeNotFound)
-	})
-	gtest.C(t, func(t *gtest.T) {
-		client := g.Client()
-		client.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
-		result, err := client.Discovery(nil).Get(ctx, "/http-registry")
 		defer result.Close()
 		t.AssertNil(err)
 		t.Assert(result.ReadAllString(), svcName)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		client := g.Client()
+		client.SetPrefix(fmt.Sprintf("http://%s", svcName))
+		result, err := client.Discovery(nil).Get(ctx, "/http-registry")
+		defer result.Close()
+		t.AssertNE(err, nil)
+	})
+}
+
+func Test_HTTP_Server_Endpoints(t *testing.T) {
+	var (
+		svcName = guid.S()
+		dirPath = gfile.Temp(svcName)
+	)
+	defer gfile.Remove(dirPath)
+	gsvc.SetRegistry(file.New(dirPath))
+
+	endpoints := []string{"10.0.0.1:8000", "10.0.0.2:8000"}
+	s := g.Server(svcName)
+	s.SetEndpoints(endpoints)
+	s.BindHandler("/http-registry", func(r *ghttp.Request) {
+		r.Response.Write(svcName)
+	})
+	s.SetDumpRouterMap(false)
+	s.Start()
+	defer s.Shutdown()
+
+	time.Sleep(100 * time.Millisecond)
+
+	gtest.C(t, func(t *gtest.T) {
+		service, err := gsvc.Get(ctx, svcName)
+		t.AssertNil(err)
+		t.Assert(service.GetEndpoints(), gstr.Join(endpoints, ","))
 	})
 }

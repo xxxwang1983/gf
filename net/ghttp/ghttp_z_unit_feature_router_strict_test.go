@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -251,5 +252,170 @@ func Test_Issue1708(t *testing.T) {
 			client.PostContent(ctx, "/test", content),
 			`{"code":0,"message":"","data":{"page":0,"size":0,"targetType":"topic","targetId":10785,"test":[[{"name":"123"}]]}}`,
 		)
+	})
+}
+
+func Test_Custom_Slice_Type_Attribute(t *testing.T) {
+	type (
+		WhiteListKey    string
+		WhiteListValues []string
+		WhiteList       map[WhiteListKey]WhiteListValues
+	)
+	type Req struct {
+		Id   int
+		List WhiteList
+	}
+	type Res struct {
+		Content string
+	}
+
+	s := g.Server(guid.S())
+	s.Use(ghttp.MiddlewareHandlerResponse)
+	s.BindHandler("/test", func(ctx context.Context, req *Req) (res *Res, err error) {
+		return &Res{
+			Content: gjson.MustEncodeString(req),
+		}, nil
+	})
+	s.SetDumpRouterMap(false)
+	s.Start()
+	defer s.Shutdown()
+
+	time.Sleep(100 * time.Millisecond)
+	gtest.C(t, func(t *gtest.T) {
+		client := g.Client()
+		client.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
+		content := `
+{
+    "id":1,
+	"list":{
+		"key": ["a", "b", "c"]
+	}
+}
+`
+		t.Assert(
+			client.PostContent(ctx, "/test", content),
+			`{"code":0,"message":"","data":{"Content":"{\"Id\":1,\"List\":{\"key\":[\"a\",\"b\",\"c\"]}}"}}`,
+		)
+	})
+}
+
+func Test_Router_Handler_Strict_WithGeneric(t *testing.T) {
+	type TestReq struct {
+		Age int
+	}
+	type TestGeneric[T any] struct {
+		Test T
+	}
+	type Test1Res struct {
+		Age TestGeneric[int]
+	}
+	type Test2Res TestGeneric[int]
+	type TestGenericRes[T any] struct {
+		Test T
+	}
+
+	s := g.Server(guid.S())
+	s.Use(ghttp.MiddlewareHandlerResponse)
+	s.BindHandler("/test1", func(ctx context.Context, req *TestReq) (res *Test1Res, err error) {
+		return &Test1Res{
+			Age: TestGeneric[int]{
+				Test: req.Age,
+			},
+		}, nil
+	})
+	s.BindHandler("/test1_slice", func(ctx context.Context, req *TestReq) (res []Test1Res, err error) {
+		return []Test1Res{
+			Test1Res{
+				Age: TestGeneric[int]{
+					Test: req.Age,
+				},
+			},
+		}, nil
+	})
+	s.BindHandler("/test2", func(ctx context.Context, req *TestReq) (res *Test2Res, err error) {
+		return &Test2Res{
+			Test: req.Age,
+		}, nil
+	})
+
+	s.BindHandler("/test2_slice", func(ctx context.Context, req *TestReq) (res []Test2Res, err error) {
+		return []Test2Res{
+			Test2Res{
+				Test: req.Age,
+			},
+		}, nil
+	})
+
+	s.BindHandler("/test3", func(ctx context.Context, req *TestReq) (res *TestGenericRes[int], err error) {
+		return &TestGenericRes[int]{
+			Test: req.Age,
+		}, nil
+	})
+
+	s.SetDumpRouterMap(false)
+	s.Start()
+	defer s.Shutdown()
+
+	s.BindHandler("/test3_slice", func(ctx context.Context, req *TestReq) (res []TestGenericRes[int], err error) {
+		return []TestGenericRes[int]{
+			TestGenericRes[int]{
+				Test: req.Age,
+			},
+		}, nil
+	})
+
+	time.Sleep(100 * time.Millisecond)
+	gtest.C(t, func(t *gtest.T) {
+		client := g.Client()
+		client.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
+
+		t.Assert(client.GetContent(ctx, "/test1?age=1"), `{"code":0,"message":"","data":{"Age":{"Test":1}}}`)
+		t.Assert(client.GetContent(ctx, "/test1_slice?age=1"), `{"code":0,"message":"","data":[{"Age":{"Test":1}}]}`)
+		t.Assert(client.GetContent(ctx, "/test2?age=2"), `{"code":0,"message":"","data":{"Test":2}}`)
+		t.Assert(client.GetContent(ctx, "/test2_slice?age=2"), `{"code":0,"message":"","data":[{"Test":2}]}`)
+		t.Assert(client.GetContent(ctx, "/test3?age=3"), `{"code":0,"message":"","data":{"Test":3}}`)
+		t.Assert(client.GetContent(ctx, "/test3_slice?age=3"), `{"code":0,"message":"","data":[{"Test":3}]}`)
+	})
+}
+
+type ParameterCaseSensitiveController struct{}
+
+type ParameterCaseSensitiveControllerPathReq struct {
+	g.Meta `path:"/api/*path" method:"post"`
+	Path   string
+}
+
+type ParameterCaseSensitiveControllerPathRes struct {
+	Path string
+}
+
+func (c *ParameterCaseSensitiveController) Path(
+	ctx context.Context,
+	req *ParameterCaseSensitiveControllerPathReq,
+) (res *ParameterCaseSensitiveControllerPathRes, err error) {
+	return &ParameterCaseSensitiveControllerPathRes{Path: req.Path}, nil
+}
+
+func Test_Router_Handler_Strict_ParameterCaseSensitive(t *testing.T) {
+	s := g.Server(guid.S())
+	s.Use(ghttp.MiddlewareHandlerResponse)
+	s.Group("/", func(group *ghttp.RouterGroup) {
+		group.Bind(&ParameterCaseSensitiveController{})
+	})
+	s.SetDumpRouterMap(false)
+	s.Start()
+	defer s.Shutdown()
+
+	time.Sleep(100 * time.Millisecond)
+	gtest.C(t, func(t *gtest.T) {
+		client := g.Client()
+		client.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
+
+		for i := 0; i < 1000; i++ {
+			t.Assert(
+				client.PostContent(ctx, "/api/111", `{"Path":"222"}`),
+				`{"code":0,"message":"","data":{"Path":"222"}}`,
+			)
+		}
 	})
 }

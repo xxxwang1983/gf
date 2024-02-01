@@ -96,7 +96,9 @@ func DBFromCtx(ctx context.Context) DB {
 	return nil
 }
 
-// ToSQL formats and returns the last one of sql statements in given closure function.
+// ToSQL formats and returns the last one of sql statements in given closure function
+// WITHOUT TRULY EXECUTING IT.
+// Be caution that, all the following sql statements should use the context object passing by function `f`.
 func ToSQL(ctx context.Context, f func(ctx context.Context) error) (sql string, err error) {
 	var manager = &CatchSQLManager{
 		SQLArray: garray.NewStrArray(),
@@ -108,7 +110,8 @@ func ToSQL(ctx context.Context, f func(ctx context.Context) error) (sql string, 
 	return
 }
 
-// CatchSQL catches and returns all sql statements that are executed in given closure function.
+// CatchSQL catches and returns all sql statements that are EXECUTED in given closure function.
+// Be caution that, all the following sql statements should use the context object passing by function `f`.
 func CatchSQL(ctx context.Context, f func(ctx context.Context) error) (sqlArray []string, err error) {
 	var manager = &CatchSQLManager{
 		SQLArray: garray.NewStrArray(),
@@ -200,32 +203,39 @@ func GetInsertOperationByOption(option InsertOption) string {
 	var operator string
 	switch option {
 	case InsertOptionReplace:
-		operator = "REPLACE"
+		operator = InsertOperationReplace
 	case InsertOptionIgnore:
-		operator = "INSERT IGNORE"
+		operator = InsertOperationIgnore
 	default:
-		operator = "INSERT"
+		operator = InsertOperationInsert
 	}
 	return operator
 }
 
-// DataToMapDeep converts `value` to map type recursively(if attribute struct is embedded).
+func anyValueToMapBeforeToRecord(value interface{}) map[string]interface{} {
+	return gconv.Map(value, gconv.MapOption{
+		Tags:      structTagPriority,
+		OmitEmpty: true, // To be compatible with old version from v2.6.0.
+	})
+}
+
+// DaToMapDeep is deprecated, use MapOrStructToMapDeep instead.
+func DaToMapDeep(value interface{}) map[string]interface{} {
+	return MapOrStructToMapDeep(value, true)
+}
+
+// MapOrStructToMapDeep converts `value` to map type recursively(if attribute struct is embedded).
 // The parameter `value` should be type of *map/map/*struct/struct.
 // It supports embedded struct definition for struct.
-func DataToMapDeep(value interface{}) map[string]interface{} {
-	m := gconv.Map(value, structTagPriority...)
+func MapOrStructToMapDeep(value interface{}, omitempty bool) map[string]interface{} {
+	m := gconv.Map(value, gconv.MapOption{
+		Tags:      structTagPriority,
+		OmitEmpty: omitempty,
+	})
 	for k, v := range m {
 		switch v.(type) {
 		case time.Time, *time.Time, gtime.Time, *gtime.Time, gjson.Json, *gjson.Json:
 			m[k] = v
-
-		default:
-			// Use string conversion in default.
-			if s, ok := v.(iString); ok {
-				m[k] = s.String()
-			} else {
-				m[k] = v
-			}
 		}
 	}
 	return m
@@ -373,17 +383,6 @@ func GetPrimaryKeyCondition(primary string, where ...interface{}) (newWhereCondi
 	return where
 }
 
-// formatSql formats the sql string and its arguments before executing.
-// The internal handleArguments function might be called twice during the SQL procedure,
-// but do not worry about it, it's safe and efficient.
-func formatSql(sql string, args []interface{}) (newSql string, newArgs []interface{}) {
-	// DO NOT do this as there may be multiple lines and comments in the sql.
-	// sql = gstr.Trim(sql)
-	// sql = gstr.Replace(sql, "\n", " ")
-	// sql, _ = gregex.ReplaceString(`\s{2,}`, ` `, sql)
-	return handleArguments(sql, args)
-}
-
 type formatWhereHolderInput struct {
 	WhereHolder
 	OmitNil   bool
@@ -428,7 +427,7 @@ func formatWhereHolder(ctx context.Context, db DB, in formatWhereHolderInput) (n
 		newArgs = formatWhereInterfaces(db, gconv.Interfaces(in.Where), buffer, newArgs)
 
 	case reflect.Map:
-		for key, value := range DataToMapDeep(in.Where) {
+		for key, value := range MapOrStructToMapDeep(in.Where, true) {
 			if in.OmitNil && empty.IsNil(value) {
 				continue
 			}
@@ -483,7 +482,7 @@ func formatWhereHolder(ctx context.Context, db DB, in formatWhereHolderInput) (n
 		var (
 			reflectType = reflectInfo.OriginValue.Type()
 			structField reflect.StructField
-			data        = DataToMapDeep(in.Where)
+			data        = MapOrStructToMapDeep(in.Where, true)
 		)
 		// If `Prefix` is given, it checks and retrieves the table name.
 		if in.Prefix != "" {

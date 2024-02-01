@@ -169,8 +169,12 @@ func (g *RouterGroup) Bind(handlerOrObject ...interface{}) *RouterGroup {
 				"/",
 				item,
 			)
+
 		default:
-			g.server.Logger().Fatalf(ctx, "invalid bind parameter type: %v", originValueAndKind.InputValue.Type())
+			g.server.Logger().Fatalf(
+				ctx, "invalid bind parameter type: %v, should be route function or struct object",
+				originValueAndKind.InputValue.Type(),
+			)
 		}
 	}
 	return group
@@ -251,7 +255,7 @@ func (g *RouterGroup) REST(pattern string, object interface{}) *RouterGroup {
 }
 
 // Hook registers a hook to given route pattern.
-func (g *RouterGroup) Hook(pattern string, hook string, handler HandlerFunc) *RouterGroup {
+func (g *RouterGroup) Hook(pattern string, hook HookName, handler HandlerFunc) *RouterGroup {
 	return g.Clone().preBindToLocalArray(groupBindTypeHandler, pattern, handler, hook)
 }
 
@@ -413,7 +417,7 @@ func (g *RouterGroup) doBindRoutersToServer(ctx context.Context, item *preBindIt
 			in := doBindHookHandlerInput{
 				Prefix:   prefix,
 				Pattern:  pattern,
-				HookName: extras[0],
+				HookName: HookName(extras[0]),
 				Handler:  handler,
 				Source:   source,
 			}
